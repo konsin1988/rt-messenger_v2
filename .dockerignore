@@ -1,0 +1,52 @@
+# ============================================
+# Messenger v2 — .dockerignore (root context)
+# Optimizes build context for server (./server) and keeps secrets out
+# ============================================
+
+# ── Git / docs (not needed in image) ───────
+.git
+.gitignore
+.github
+README.md
+AGENTS.md
+PROJECT_STRUCTURE.md
+STEPS.md
+*.md
+
+# ── Env (secrets) ──────────────────────────
+.env
+.env.prod
+.env.local
+.env.*.local
+
+# ── Client (separate context) ──────────────
+client/build
+client/.dart_tool
+client/.pub-cache
+client/.flutter-plugins
+client/coverage
+
+# ── Server build cache ─────────────────────
+server/target
+server/.cargo
+**/target
+**/*.rs.bk
+
+# ── Docker / compose ───────────────────────
+docker-compose*.yml
+docker-compose*.prod.yml
+nginx.conf
+
+# ── OS / IDE ───────────────────────────────
+.DS_Store
+.idea
+.vscode
+*.log
+logs
+
+# ── Volumes / data ─────────────────────────
+data
+rustfs_data
+postgres_data
+cassandra_data
+volumes

@@ -1,0 +1,117 @@
+services:
+  # ── PostgreSQL ──────────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres-messenger
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - rt-messenger
+
+  # ── Cassandra ──────────────────────────────────────────────
+  cassandra:
+    image: cassandra:5.0.9
+    container_name: cassandra-messenger
+    restart: unless-stopped
+    environment:
+      CASSANDRA_CLUSTER_NAME: ${CASSANDRA_CLUSTER_NAME}
+      CASSANDRA_DC: ${CASSANDRA_DC}
+      CASSANDRA_ENDPOINT_SNITCH: SimpleSnitch
+    ports:
+      - "${CASSANDRA_PORT:-9042}:9042"
+    volumes:
+      - cassandra_dev_data:/var/lib/cassandra
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh -e 'describe cluster'"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+    networks:
+      - rt-messenger
+
+  # ── RustFS (S3-compatible, attachment storage) ─────────────
+  rustfs:
+    image: rustfs/rustfs:1.0.0-rc.3
+    container_name: rustfs-messenger
+    restart: unless-stopped
+    ports:
+      - "${RUSTFS_S3_PORT:-9000}:9000"
+      - "${RUSTFS_CONSOLE_PORT:-9001}:9001"
+    environment:
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY}
+      RUSTFS_ADDRESS: ":9000"
+      RUSTFS_CONSOLE_ADDRESS: ":9001"
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_VOLUMES: "/data"
+      RUSTFS_OBS_LOGGER_LEVEL: "error"
+    volumes:
+      - rustfs_dev_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9000/health && curl -f http://localhost:9001/rustfs/console/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - rt-messenger
+
+  # ── Rust Server ────────────────────────────────────────────
+  server:
+    image: konsin1988/messenger:${PROJECT_VERSION}
+    container_name: server-messenger
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+      target: dev
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "${GRPC_PORT:-50051}:50051"
+    volumes:
+      - ./server/src:/app/src
+      - ./server/proto:/app/proto
+    depends_on:
+      postgres:
+        condition: service_healthy
+      cassandra:
+        condition: service_healthy
+      rustfs:
+        condition: service_healthy
+    networks:
+      - rt-messenger
+
+  # ── Flutter Client (dev server) ────────────────────────────
+  # flutter:
+  #   image: ghcr.io/cirruslabs/flutter:3.47.0
+  #   working_dir: /app
+  #   command: flutter run --debug --machine --device-id=flutter-web --web-port=3000
+  #   ports:
+  #     - "${FLUTTER_DEBUG_PORT:-9100}:3000"
+  #   volumes:
+  #     - ./client:/app
+  #     - flutter_pub_cache:/root/.pub-cache
+  #   depends_on:
+  #     - server
+  #   networks:
+  #     - rt-messenger
+
+volumes:
+  postgres_dev_data:
+  cassandra_dev_data:
+  rustfs_dev_data:
+  flutter_pub_cache:
+
+networks:
+  rt-messenger:
+    name: rt-messenger
+    external: true

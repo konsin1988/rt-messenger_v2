@@ -1,0 +1,101 @@
+# ============================================
+# Messenger v2 — .gitignore
+# Stack: Flutter 3.47 + Rust 1.97 + Postgres 15 + Cassandra 5.0.9 + RustFS 1.0.0-rc.3
+# ============================================
+
+# ── Environment / secrets ──────────────────
+# .env (dev) and .env.prod (template) are committed with safe defaults — do NOT ignore
+# Ignore local overrides and production secrets
+/**/.env
+/**/.env.prod
+.env.local
+.env.*.local
+.env.production
+.env.development.local
+.env.staging
+*.env.bak
+
+# ── OS ─────────────────────────────────────
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ── IDE / editors ──────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.history/
+*.iml
+
+# ── Git ────────────────────────────────────
+*.orig
+
+# ── Flutter / Dart (client/) ───────────────
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+pubspec.lock
+build/
+.client_build/
+.generated/
+*.freezed.dart
+*.g.dart
+*.gr.dart
+l10n/generated/
+coverage/
+.flutter/
+ios/Pods/
+ios/.generated/
+android/.gradle/
+android/app/build/
+android/local.properties
+web/canvaskit/
+client/build/
+client/.dart_tool/
+client/.pub-cache/
+
+# ── Rust (server/) ─────────────────────────
+# Keep Cargo.lock for binary (server) — do not ignore
+target/
+**/target/
+debug/
+*.rs.bk
+*.pdb
+
+# ── Docker / volumes (local bind mounts) ───
+# Compose volumes are named, but ignore local data dirs if created
+data/
+rustfs_data/
+postgres_data/
+cassandra_data/
+volumes/
+
+# ── Logs ───────────────────────────────────
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ── Protobuf / generated ───────────────────
+# Keep server/proto/messenger.proto, ignore generated stubs
+client/lib/core/api/generated/*.pb.dart
+client/lib/core/api/generated/*.pbgrpc.dart
+client/lib/core/api/generated/*.pbjson.dart
+server/target/
+
+# ── Flutter secure storage / keys ──────────
+*.jks
+*.keystore
+key.properties
+
+# ── Misc ───────────────────────────────────
+.tmp/
+temp/
+.cache/
+coverage/
+.nyc_output/

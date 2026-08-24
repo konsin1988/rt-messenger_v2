@@ -1,0 +1,10 @@
+# Client build context
+.dart_tool
+.build
+build
+.pub-cache
+.pub
+.idea
+.vscode
+coverage
+*.log

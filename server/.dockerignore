@@ -1,0 +1,10 @@
+# Server build context — ignore everything not needed for cargo build
+target
+.git
+.gitignore
+Dockerfile
+README.md
+.env
+*.log
+logs
+.migrations_backup
