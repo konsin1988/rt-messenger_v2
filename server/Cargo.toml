@@ -6,8 +6,9 @@ build = "build.rs"
 
 [dependencies]
 # gRPC
-tonic = "0.12"
+tonic = { version = "0.12", features = ["transport"] }
 prost = "0.13"
+tonic-reflection = "0.12"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -23,6 +24,8 @@ jsonwebtoken = "9"
 bcrypt = "0.16"
 uuid = { version = "1", features = ["v4", "serde"] }
 regex = "1"
+rand = "0.8"
+dashmap = "6"
 
 # Config & logging
 dotenvy = "0.15"

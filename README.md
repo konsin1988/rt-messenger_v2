@@ -14,7 +14,6 @@ Real-time messenger — **Flutter 3.47 (Riverpod, go_router, gRPC)** + **Rust 1.
 | Cassandra | `cassandra:5.0.9` | `9042` | keyspace `messenger`, `container_name: cassandra-messenger` |
 | RustFS | `rustfs/rustfs:1.0.0-rc.3` | `9000` (S3), `9001` (Console) | bucket `messenger-attachments`, auto-created on server start (`server/src/storage.rs:25`) |
 | Rust Server | `konsin1988/messenger:${PROJECT_VERSION}` (build `target: dev`) | `50051` (gRPC) | `Tonic` — `UserService`, `MessageService`, `ChatRoomService` (`server/proto/messenger.proto:9`) |
-| Flutter (dev) | `ghcr.io/cirruslabs/flutter:3.47.0` | `9100`→`3000` | `flutter run --debug`, currently commented in `docker-compose.yml:93` |
 
 Network: `rt-messenger` (`external: true`) — all services share it. Server `depends_on: postgres, cassandra, rustfs` `healthy`.
 

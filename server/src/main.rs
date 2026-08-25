@@ -1,16 +1,20 @@
+mod auth;
+mod auth_service;
 mod config;
 mod db;
 mod models;
 mod storage;
-mod auth;
 
 pub mod messenger {
     tonic::include_proto!("messenger");
+    pub const FILE_DESCRIPTOR_SET: &[u8] =
+        tonic::include_file_descriptor_set!("messenger_descriptor");
 }
 
-use messenger::user_service_server::{UserService, UserServiceServer};
-use messenger::message_service_server::{MessageService, MessageServiceServer};
+use messenger::auth_service_server::AuthServiceServer;
 use messenger::chat_room_service_server::{ChatRoomService, ChatRoomServiceServer};
+use messenger::message_service_server::{MessageService, MessageServiceServer};
+use messenger::user_service_server::{UserService, UserServiceServer};
 use messenger::*;
 
 use scylla::Session;
@@ -26,17 +30,34 @@ use tonic::{Request, Response, Status};
 pub struct AppState {
     pub pg_pool: PgPool,
     pub scylla_session: Arc<Session>,
-    pub redis_client: redis::Client,
+    pub redis_client: ::redis::Client,
     pub jwt_secret: String,
     pub tx: broadcast::Sender<Message>,
     pub s3_client: aws_sdk_s3::Client,
     pub rustfs_bucket: String,
 }
 
+fn jwt_for_user(user_id: uuid::Uuid, jwt_secret: &str, exp_secs: i64) -> Result<String, Status> {
+    let now = chrono::Utc::now().timestamp() as usize;
+    let exp = (chrono::Utc::now() + chrono::Duration::seconds(exp_secs)).timestamp() as usize;
+    let claims = auth::Claims {
+        sub: user_id.to_string(),
+        exp,
+        iat: now,
+    };
+    jsonwebtoken::encode(
+        &jsonwebtoken::Header::default(),
+        &claims,
+        &jsonwebtoken::EncodingKey::from_secret(jwt_secret.as_bytes()),
+    )
+    .map_err(|e| Status::internal(format!("JWT encode failed: {}", e)))
+}
+
 #[derive(Clone)]
 pub struct UserServiceImpl {
     pub pg_pool: PgPool,
     pub jwt_secret: String,
+    pub jwt_exp_secs: i64,
 }
 
 #[tonic::async_trait]
@@ -60,12 +81,7 @@ impl UserService for UserServiceImpl {
         .await
         .map_err(|e| Status::internal(e.to_string()))?;
 
-        let token = jsonwebtoken::encode(
-            &jsonwebtoken::Header::default(),
-            &serde_json::json!({"sub": user.id.to_string()}),
-            &jsonwebtoken::EncodingKey::from_secret(self.jwt_secret.as_bytes()),
-        )
-        .map_err(|e| Status::internal(e.to_string()))?;
+        let token = jwt_for_user(user.id, &self.jwt_secret, self.jwt_exp_secs)?;
 
         Ok(Response::new(AuthResponse {
             token,
@@ -88,19 +104,18 @@ impl UserService for UserServiceImpl {
         .map_err(|e| Status::internal(e.to_string()))?
         .ok_or_else(|| Status::unauthenticated("Invalid credentials"))?;
 
-        let valid = bcrypt::verify(&req.password, &user.password_hash)
+        let hash = user
+            .password_hash
+            .as_deref()
+            .ok_or_else(|| Status::unauthenticated("Invalid credentials: no password set, use OTP"))?;
+        let valid = bcrypt::verify(&req.password, hash)
             .map_err(|e| Status::internal(e.to_string()))?;
 
         if !valid {
             return Err(Status::unauthenticated("Invalid credentials"));
         }
 
-        let token = jsonwebtoken::encode(
-            &jsonwebtoken::Header::default(),
-            &serde_json::json!({"sub": user.id.to_string()}),
-            &jsonwebtoken::EncodingKey::from_secret(self.jwt_secret.as_bytes()),
-        )
-        .map_err(|e| Status::internal(e.to_string()))?;
+        let token = jwt_for_user(user.id, &self.jwt_secret, self.jwt_exp_secs)?;
 
         Ok(Response::new(AuthResponse {
             token,
@@ -281,8 +296,9 @@ impl From<models::User> for User {
         Self {
             id: u.id.to_string(),
             username: u.username,
-            email: u.email,
+            email: u.email.unwrap_or_default(),
             created_at: u.created_at.to_rfc3339(),
+            phone: u.phone.unwrap_or_default(),
         }
     }
 }
@@ -354,17 +370,42 @@ async fn main() -> anyhow::Result<()> {
     let user_svc = UserServiceImpl {
         pg_pool: state.pg_pool.clone(),
         jwt_secret: state.jwt_secret.clone(),
+        jwt_exp_secs: config.jwt_exp_secs,
     };
     let msg_svc = MessageServiceImpl { state: state.clone() };
     let room_svc = ChatRoomServiceImpl;
+    let auth_svc = auth_service::AuthServiceImpl::new(
+        state.pg_pool.clone(),
+        state.jwt_secret.clone(),
+        config.jwt_exp_secs,
+        config.sms_mock,
+        config.otp_ttl_secs,
+        config.otp_country_prefix.clone(),
+    );
 
-    let auth_interceptor = auth::AuthInterceptor::new(state.jwt_secret.clone());
+    // MessageService protected; AuthService is public
+    let message_auth_interceptor = auth::AuthInterceptor::new(state.jwt_secret.clone());
 
     tracing::info!("gRPC server listening on {}", addr);
+    tracing::info!(
+        "Auth OTP: sms_mock={}, otp_ttl={}s, jwt_exp={}s",
+        config.sms_mock,
+        config.otp_ttl_secs,
+        config.jwt_exp_secs
+    );
+
+    let reflection = tonic_reflection::server::Builder::configure()
+        .register_encoded_file_descriptor_set(messenger::FILE_DESCRIPTOR_SET)
+        .build_v1()?;
 
     tonic::transport::Server::builder()
+        .add_service(reflection)
         .add_service(UserServiceServer::new(user_svc))
-        .add_service(MessageServiceServer::with_interceptor(msg_svc, auth_interceptor))
+        .add_service(AuthServiceServer::new(auth_svc))
+        .add_service(MessageServiceServer::with_interceptor(
+            msg_svc,
+            message_auth_interceptor,
+        ))
         .add_service(ChatRoomServiceServer::new(room_svc))
         .serve(addr)
         .await?;

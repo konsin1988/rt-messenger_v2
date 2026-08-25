@@ -6,13 +6,15 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE TABLE IF NOT EXISTS "user" (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     username        VARCHAR(255) UNIQUE NOT NULL,
-    email           VARCHAR(255) UNIQUE NOT NULL,
-    password_hash   VARCHAR(255) NOT NULL,
+    email           VARCHAR(255) UNIQUE,
+    password_hash   VARCHAR(255),
+    phone           VARCHAR(20) UNIQUE,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_user_email ON "user"(email);
+CREATE INDEX IF NOT EXISTS idx_user_phone ON "user"(phone);
 
 -- ============================================================
 -- USER_PROFILE
@@ -132,3 +134,18 @@ CREATE TABLE IF NOT EXISTS attachment (
 
 CREATE INDEX IF NOT EXISTS idx_attachment_message_id ON attachment(message_id);
 CREATE INDEX IF NOT EXISTS idx_attachment_uploader_id ON attachment(uploader_id);
+
+-- ============================================================
+-- PHONE_VERIFICATION (OTP)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS phone_verification (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    phone           VARCHAR(20) NOT NULL,
+    otp_hash        VARCHAR(255) NOT NULL,
+    expires_at      TIMESTAMPTZ NOT NULL,
+    attempts        INT NOT NULL DEFAULT 0,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_pv_phone ON phone_verification(phone);
+CREATE INDEX IF NOT EXISTS idx_pv_expires_at ON phone_verification(expires_at);

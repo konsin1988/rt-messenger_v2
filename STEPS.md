@@ -68,6 +68,69 @@ Replaces `email+password` `server/proto/messenger.proto:9` with mobile flow.
   - Riverpod `auth_provider.dart` — store JWT in `flutter_secure_storage`, attach to `grpc_client.dart:24` via `CallOptions(metadata: {'authorization': 'Bearer $token'})`, `go_router` guard: if token null → `/login` else `/chats`
 - [ ] 1.5 Verify: `cargo test` OTP hash/verify/expiry, `grpcurl` RequestOTP → VerifyOTP → JWT, Flutter Android emulator full flow, check `psql` `phone_verification` cleanup
 
+### Phase 1 Tests — Autotest (Option A)
+
+> Autotest covers `cargo test` (unit + integration with Postgres) + `grpcurl` E2E + `psql` cleanup. Run via `cargo test` and `scripts/test_phase1.sh`. See `server/src/auth_service.rs:330` `#[cfg(test)]` and `server/tests/auth_phase1.rs` + `server/tests/common.rs`.
+
+**How to run:**
+```bash
+# unit only (no DB)
+cargo test --manifest-path server/Cargo.toml --lib -- --nocapture
+
+# unit + integration (needs postgres, uses .env DATABASE_URL)
+docker compose up -d postgres redis
+cargo sqlx migrate run   # applies server/migrations/001_init.sql
+cargo test --manifest-path server/Cargo.toml -- --nocapture --test-threads=1
+
+# autotest script (spins postgres+redis, migrates, runs tests, grpcurl E2E if server running)
+bash scripts/test_phase1.sh
+
+# manual E2E
+grpcurl -plaintext -d '{"phone":"+79990001122"}' localhost:50051 messenger.AuthService/RequestOTP
+grpcurl -plaintext -d '{"phone":"+79990001122","code":"<debug_otp>","username":"alice"}' localhost:50051 messenger.AuthService/VerifyOTP
+grpcurl -plaintext -d '{"token":"<jwt>"}' localhost:50051 messenger.AuthService/RefreshToken
+psql "postgres://messenger_user:1234@localhost:5432/messenger" -c "SELECT phone,attempts,expires_at FROM phone_verification ORDER BY created_at DESC LIMIT 5"
+```
+
+**Unit tests (`server/src/auth_service.rs:47` `validate_phone`, `auth_service.rs:68` `check_rate_limit`, `auth_service.rs:82` `issue_jwt`, `server/src/auth.rs:55` `verify_token`):**
+
+| # | Test | File:line | Input → Expected |
+|---|------|-----------|------------------|
+| T1 | `test_validate_phone_ok` | `auth_service.rs:47` | `+79990001122`, `79990001122`, `+12345678901` → `Ok` |
+| T2 | `test_validate_phone_invalid` | `auth_service.rs:47` | `""`, `123`, `+1234567890123456` (16), `abc`, `+7 999 000` → `InvalidArgument` |
+| T3 | `test_validate_phone_country_prefix` | `auth_service.rs:54` | `OTP_COUNTRY_PREFIX=+7`, `+7999...` → Ok, `+1212...` → `InvalidArgument` contains "country prefix"; empty prefix allows all |
+| T4 | `test_rate_limit_allow_3` | `auth_service.rs:68` | 3× `check_rate_limit(phone)` → Ok |
+| T5 | `test_rate_limit_block_4th` | `auth_service.rs:68` | 4th within 60s → `ResourceExhausted` "3 OTP requests per minute" |
+| T6 | `test_rate_limit_ip_isolation` | `auth_service.rs:68` | key `phone:ip1` vs `phone:ip2` isolated (DashMap) |
+| T7 | `test_bcrypt_otp_roundtrip` | `auth_service.rs:127` | `hash("123456")` then `verify("123456") == true`, `verify("654321")==false` |
+| T8 | `test_issue_jwt_claims` | `auth_service.rs:82` | `issue_jwt(uuid)` → `verify_token` ok, `claims.sub==uuid`, `exp - iat ≈ JWT_EXP_SECS (604800)` ±5s, wrong secret → `Unauthenticated` |
+| T9 | `test_verify_token_expired` | `auth.rs:55` | token `exp=now-10` → `Invalid token: ExpiredSignature` |
+| T10 | `test_verify_token_wrong_secret` | `auth.rs:55` | `verify_token("wrong")` → `Unauthenticated` |
+| T11 | `test_username_validation` | `auth_service.rs:237` | `alice`, `a1_-` (3-32) ok; `ab`, `a*`, 33-char → `InvalidArgument` |
+
+**Integration tests (`server/tests/auth_phase1.rs`, `tokio::test`, `PgPool`, `TRUNCATE` `server/tests/common.rs:10`):**
+
+| # | Test | RPC / SQL | Asserts |
+|---|------|-----------|---------|
+| I1 | `test_request_otp_mock` | `RequestOTP {phone} sms_mock=true` (`auth_service.rs:101`) | `success=true debug_otp=6 digits`, `SELECT phone,otp_hash,expires_at,attempts` 1 row, `otp_hash` bcrypt verifies, `expires_at ≈ now+OTP_TTL_SECS (300)` ±5s, `attempts=0` |
+| I2 | `test_request_otp_no_mock` | `sms_mock=false` | `debug_otp==""` but still inserted |
+| I3 | `test_request_otp_invalid_phone` | `phone=123` | → `InvalidArgument`, `0` rows |
+| I4 | `test_request_otp_rate_limit_db` | 4× same phone | 4th → `ResourceExhausted` |
+| I5 | `test_verify_otp_new_user` | `VerifyOTP {debug_otp}` first time | `DELETE phone_verification` 0 rows after, `SELECT "user" WHERE phone` 1 row `username` auto `user_<last4>_xxxx`, `user_profile` row exists, `token` verifies `sub==user.id`, `User.phone` via `main.rs:292` correct |
+| I6 | `test_verify_otp_existing_user_reuse` | 2nd `RequestOTP→VerifyOTP` same phone | same `user.id` reused, no duplicate |
+| I7 | `test_verify_otp_with_username` | `username=alice` | `user.username=="alice"`; duplicate `alice` → retry suffix `alice_xxxx` (`auth_service.rs:272`) |
+| I8 | `test_verify_otp_wrong_code_increments` | `code=000000` | `attempts 0→1`, → `Unauthenticated`, after 5 wrong → `ResourceExhausted` (`auth_service.rs:198`) |
+| I9 | `test_verify_otp_expired` | insert `expires_at=NOW()-1s` | → `Unauthenticated "expired"` (`auth_service.rs:196`) |
+| I10 | `test_verify_otp_replay_deleted` | verify correct then repeat same `code` | 2nd → `Unauthenticated` not found (deleted) |
+| I11 | `test_verify_otp_6digit_validation` | `code=123` / `abc123` | → `InvalidArgument "6 digits"` (`auth_service.rs:171`) |
+| I12 | `test_refresh_token_ok` | `RefreshToken {token}` | new `token` `sub` same, `iat` newer (`auth_service.rs:305`) |
+| I13 | `test_refresh_token_invalid` | `token=bad` | → `Unauthenticated` |
+| I14 | `test_psql_cleanup` | after success | `SELECT COUNT(*) FROM phone_verification WHERE phone=$1` ==0 |
+
+**Autotest wiring:**
+- `server/tests/common.rs` `test_pool()` reads `DATABASE_URL` (expand `${VAR}` via `config.rs:20`), runs `sqlx::migrate!("./migrations")`, helper `truncate_all(pool)` for isolation; `#[ignore]`-free, `cargo test` auto-skips if `DATABASE_URL` not set (returns `pool` error → test panics with clear msg). `--test-threads=1` ensures `DashMap` rate limiter not cross-test polluted (each `AuthServiceImpl::new` gets fresh `Arc<DashMap>`).
+- `scripts/test_phase1.sh` — brings `postgres+redis` (`docker compose up -d postgres redis`), waits `pg_isready`, runs `cargo test -- --nocapture`, optionally `grpcurl` E2E if `server` healthy, prints `psql` `phone_verification` count, exits non-zero on failure.
+
 ## Phase 2 — Users & Profile (1-2 days)
 Uses existing `user_profile` `001_init.sql:20`.
 - [ ] 2.1 Proto: `UpdateProfileRequest { display_name, bio, avatar_url }`, `GetMe`, `GetUser` already exists
