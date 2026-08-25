@@ -1,0 +1,125 @@
+syntax = "proto3";
+
+package messenger;
+
+option java_multiple_files = true;
+option java_package = "com.messenger.grpc";
+
+// ── User Service ──────────────────────────────────────────────
+service UserService {
+    rpc Register(RegisterRequest) returns (AuthResponse);
+    rpc Login(LoginRequest) returns (AuthResponse);
+    rpc GetUser(GetUserRequest) returns (User);
+    rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
+}
+
+// ── Message Service ───────────────────────────────────────────
+service MessageService {
+    rpc SendMessage(SendMessageRequest) returns (Message);
+    rpc StreamMessages(StreamMessagesRequest) returns (stream Message);
+    rpc GetHistory(GetHistoryRequest) returns (GetHistoryResponse);
+}
+
+// ── Chat Room Service ─────────────────────────────────────────
+service ChatRoomService {
+    rpc CreateRoom(CreateRoomRequest) returns (Room);
+    rpc JoinRoom(JoinRoomRequest) returns (JoinRoomResponse);
+    rpc LeaveRoom(LeaveRoomRequest) returns (LeaveRoomResponse);
+    rpc ListRooms(ListRoomsRequest) returns (ListRoomsResponse);
+}
+
+// ── Messages ──────────────────────────────────────────────────
+message User {
+    string id = 1;
+    string username = 2;
+    string email = 3;
+    string created_at = 4;
+}
+
+message Message {
+    string id = 1;
+    string room_id = 2;
+    string sender_id = 3;
+    string content = 4;
+    int64 timestamp = 5;
+}
+
+message Room {
+    string id = 1;
+    string name = 2;
+    repeated string member_ids = 3;
+    string created_at = 4;
+}
+
+// ── Auth ──────────────────────────────────────────────────────
+message RegisterRequest {
+    string username = 1;
+    string email = 2;
+    string password = 3;
+}
+
+message LoginRequest {
+    string email = 1;
+    string password = 2;
+}
+
+message AuthResponse {
+    string token = 1;
+    User user = 2;
+}
+
+// ── User RPCs ─────────────────────────────────────────────────
+message GetUserRequest {
+    string user_id = 1;
+}
+
+message ListUsersRequest {}
+message ListUsersResponse {
+    repeated User users = 1;
+}
+
+// ── Message RPCs ──────────────────────────────────────────────
+message SendMessageRequest {
+    string room_id = 1;
+    string content = 2;
+}
+
+message StreamMessagesRequest {
+    string room_id = 1;
+}
+
+message GetHistoryRequest {
+    string room_id = 1;
+    int32 limit = 2;
+}
+
+message GetHistoryResponse {
+    repeated Message messages = 1;
+}
+
+// ── Room RPCs ─────────────────────────────────────────────────
+message CreateRoomRequest {
+    string name = 1;
+    repeated string member_ids = 2;
+}
+
+message JoinRoomRequest {
+    string room_id = 1;
+}
+
+message JoinRoomResponse {
+    bool success = 1;
+}
+
+message LeaveRoomRequest {
+    string room_id = 1;
+}
+
+message LeaveRoomResponse {
+    bool success = 1;
+}
+
+message ListRoomsRequest {}
+message ListRoomsResponse {
+    repeated Room rooms = 1;
+}

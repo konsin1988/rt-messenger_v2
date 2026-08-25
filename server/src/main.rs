@@ -2,6 +2,7 @@ mod config;
 mod db;
 mod models;
 mod storage;
+mod auth;
 
 pub mod messenger {
     tonic::include_proto!("messenger");
@@ -25,6 +26,7 @@ use tonic::{Request, Response, Status};
 pub struct AppState {
     pub pg_pool: PgPool,
     pub scylla_session: Arc<Session>,
+    pub redis_client: redis::Client,
     pub jwt_secret: String,
     pub tx: broadcast::Sender<Message>,
     pub s3_client: aws_sdk_s3::Client,
@@ -150,12 +152,18 @@ impl MessageService for MessageServiceImpl {
         &self,
         request: Request<SendMessageRequest>,
     ) -> Result<Response<Message>, Status> {
+        let sender_id = request
+            .extensions()
+            .get::<uuid::Uuid>()
+            .copied()
+            .ok_or_else(|| Status::unauthenticated("Missing user ID"))?;
+
         let req = request.into_inner();
         let msg = models::Message {
             id: uuid::Uuid::new_v4(),
             room_id: uuid::Uuid::parse_str(&req.room_id)
                 .map_err(|e| Status::invalid_argument(e.to_string()))?,
-            sender_id: uuid::Uuid::new_v4(), // TODO: extract from JWT
+            sender_id,
             content: req.content,
             created_at: chrono::Utc::now(),
         };
@@ -309,6 +317,13 @@ async fn main() -> anyhow::Result<()> {
 
     let scylla_session = Arc::new(db::cassandra::create_session(&config.cassandra_url).await?);
 
+    // ── Redis client + ping (fail-fast, caching) ─────────────────
+    let redis_client = db::redis::create_client(&config.redis_url)?;
+    if let Err(e) = db::redis::ping(&redis_client).await {
+        tracing::warn!("Redis ping failed (will retry on use): {e:?}");
+        // Fail-fast alternative: return Err(e);
+    }
+
     // ── RustFS S3 client + ensure bucket exists ─────────────────
     let s3_client = storage::create_s3_client(
         &config.rustfs_endpoint,
@@ -328,6 +343,7 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState {
         pg_pool,
         scylla_session,
+        redis_client,
         jwt_secret: config.jwt_secret.clone(),
         tx,
         s3_client,
@@ -342,11 +358,13 @@ async fn main() -> anyhow::Result<()> {
     let msg_svc = MessageServiceImpl { state: state.clone() };
     let room_svc = ChatRoomServiceImpl;
 
+    let auth_interceptor = auth::AuthInterceptor::new(state.jwt_secret.clone());
+
     tracing::info!("gRPC server listening on {}", addr);
 
     tonic::transport::Server::builder()
         .add_service(UserServiceServer::new(user_svc))
-        .add_service(MessageServiceServer::new(msg_svc))
+        .add_service(MessageServiceServer::with_interceptor(msg_svc, auth_interceptor))
         .add_service(ChatRoomServiceServer::new(room_svc))
         .serve(addr)
         .await?;

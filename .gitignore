@@ -14,6 +14,7 @@
 .env.development.local
 .env.staging
 *.env.bak
+/info
 
 # ── OS ─────────────────────────────────────
 .DS_Store

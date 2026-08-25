@@ -38,6 +38,25 @@ services:
     networks:
       - rt-messenger
 
+  # ── Redis (caching) ──────────────────────────────────────
+  redis:
+    image: redis:8.0
+    container_name: redis-messenger
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_dev_data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    networks:
+      - rt-messenger
+
   # ── RustFS (S3-compatible, attachment storage) ─────────────
   rustfs:
     image: rustfs/rustfs:1.0.0-rc.3
@@ -85,6 +104,8 @@ services:
         condition: service_healthy
       cassandra:
         condition: service_healthy
+      redis:
+        condition: service_healthy
       rustfs:
         condition: service_healthy
     networks:
@@ -108,6 +129,7 @@ services:
 volumes:
   postgres_dev_data:
   cassandra_dev_data:
+  redis_dev_data:
   rustfs_dev_data:
   flutter_pub_cache:
 

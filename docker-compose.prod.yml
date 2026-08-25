@@ -42,6 +42,26 @@ services:
         limits:
           memory: 1G
 
+  # ── Redis (caching) ──────────────────────────────────────
+  redis:
+    image: redis:8.0
+    restart: always
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_prod_data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
   # ── RustFS (S3-compatible, attachment storage) ─────────────
   rustfs:
     image: rustfs/rustfs:1.0.0-rc.3
@@ -83,6 +103,8 @@ services:
         condition: service_healthy
       cassandra:
         condition: service_healthy
+      redis:
+        condition: service_healthy
       rustfs:
         condition: service_healthy
     deploy:
@@ -105,4 +127,5 @@ services:
 volumes:
   postgres_prod_data:
   cassandra_prod_data:
+  redis_prod_data:
   rustfs_prod_data:
