@@ -59,3 +59,60 @@ pub fn verify_token(jwt_secret: &str, token: &str) -> Result<Claims, Status> {
         .map(|data| data.claims)
         .map_err(|e| Status::unauthenticated(format!("Invalid token: {}", e)))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use jsonwebtoken::{encode, EncodingKey, Header};
+
+    fn make_token(secret: &str, sub: &str, exp_offset_secs: i64) -> String {
+        let now = chrono::Utc::now().timestamp() as usize;
+        let exp = (chrono::Utc::now() + chrono::Duration::seconds(exp_offset_secs)).timestamp() as usize;
+        let claims = Claims { sub: sub.to_string(), exp, iat: now };
+        encode(&Header::default(), &claims, &EncodingKey::from_secret(secret.as_bytes())).unwrap()
+    }
+
+    #[test]
+    fn test_verify_token_ok() {
+        let token = make_token("secret123", "550e8400-e29b-41d4-a716-446655440000", 3600);
+        let claims = verify_token("secret123", &token).unwrap();
+        assert_eq!(claims.sub, "550e8400-e29b-41d4-a716-446655440000");
+    }
+
+    #[test]
+    fn test_verify_token_wrong_secret() {
+        let token = make_token("secret123", "sub", 3600);
+        let err = verify_token("wrong", &token).unwrap_err();
+        assert_eq!(err.code(), tonic::Code::Unauthenticated);
+    }
+
+    #[test]
+    fn test_verify_token_expired() {
+        // Use exp = 1 (epoch) to guarantee expiry regardless of leeway
+        let claims = Claims { sub: "sub".to_string(), exp: 1, iat: 1 };
+        let token = encode(&Header::default(), &claims, &EncodingKey::from_secret("secret123".as_bytes())).unwrap();
+        let err = verify_token("secret123", &token).unwrap_err();
+        assert_eq!(err.code(), tonic::Code::Unauthenticated);
+        assert!(err.message().contains("ExpiredSignature") || err.message().contains("Invalid token"));
+    }
+
+    #[test]
+    fn test_extract_user_id_via_metadata() {
+        let secret = "test-secret".to_string();
+        let interceptor = AuthInterceptor::new(secret.clone());
+        let user_id = uuid::Uuid::new_v4();
+        let token = make_token(&secret, &user_id.to_string(), 3600);
+        let mut meta = tonic::metadata::MetadataMap::new();
+        meta.insert("authorization", format!("Bearer {}", token).parse().unwrap());
+        let got = interceptor.extract_user_id(&meta).unwrap();
+        assert_eq!(got, user_id);
+    }
+
+    #[test]
+    fn test_extract_user_id_missing_header() {
+        let interceptor = AuthInterceptor::new("secret".to_string());
+        let meta = tonic::metadata::MetadataMap::new();
+        let err = interceptor.extract_user_id(&meta).unwrap_err();
+        assert_eq!(err.code(), tonic::Code::Unauthenticated);
+    }
+}

@@ -2,15 +2,41 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../features/auth/screens/login_screen.dart';
+import '../../features/auth/screens/otp_screen.dart';
+import '../../features/auth/screens/phone_login_screen.dart';
 import '../../features/auth/screens/register_screen.dart';
 import '../../features/chat/screens/chat_list_screen.dart';
 import '../../features/chat/screens/chat_room_screen.dart';
 import '../../features/profile/screens/profile_screen.dart';
+import '../../features/auth/providers/auth_provider.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
+  final authState = ref.watch(authProvider);
+  final isAuth = authState.value?.isAuthenticated ?? false;
+  final isLoading = authState.isLoading;
+
   return GoRouter(
-    initialLocation: '/login',
+    initialLocation: '/phone-login',
+    redirect: (context, state) {
+      if (isLoading) return null;
+      final loc = state.uri.toString();
+      final isAuthRoute = loc == '/phone-login' || loc == '/login' || loc == '/register' || loc.startsWith('/otp');
+      if (!isAuth && !isAuthRoute) return '/phone-login';
+      if (isAuth && isAuthRoute) return '/chats';
+      return null;
+    },
     routes: [
+      GoRoute(
+        path: '/phone-login',
+        builder: (context, state) => const PhoneLoginScreen(),
+      ),
+      GoRoute(
+        path: '/otp',
+        builder: (context, state) {
+          final phone = state.extra as String? ?? '';
+          return OtpScreen(phone: phone);
+        },
+      ),
       GoRoute(
         path: '/login',
         builder: (context, state) => const LoginScreen(),

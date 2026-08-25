@@ -23,7 +23,7 @@ class AppTheme {
     ),
     navigationBarTheme: NavigationBarThemeData(
       backgroundColor: _surfaceColor,
-      indicatorColor: _primaryColor.withOpacity(0.2),
+      indicatorColor: _primaryColor.withValues(alpha: 0.2),
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
@@ -44,11 +44,11 @@ class AppTheme {
         ),
       ),
     ),
-    cardTheme: CardTheme(
+    cardTheme: const CardThemeData(
       color: _surfaceColor,
       elevation: 0,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.all(Radius.circular(12)),
       ),
     ),
   );

@@ -16,6 +16,7 @@ class GrpcClient {
   late final UserServiceClient userService;
   late final MessageServiceClient messageService;
   late final ChatRoomServiceClient chatRoomService;
+  late final AuthServiceClient authService;
 
   GrpcClient({required this.host, required this.port}) {
     _channel = ClientChannel(
@@ -29,7 +30,11 @@ class GrpcClient {
     userService = UserServiceClient(_channel);
     messageService = MessageServiceClient(_channel);
     chatRoomService = ChatRoomServiceClient(_channel);
+    authService = AuthServiceClient(_channel);
   }
+
+  CallOptions authOptions(String token) =>
+      CallOptions(metadata: {'authorization': 'Bearer $token'});
 
   Future<void> dispose() async {
     await _channel.shutdown();

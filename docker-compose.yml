@@ -99,6 +99,8 @@ services:
     volumes:
       - ./server/src:/app/src
       - ./server/proto:/app/proto
+      - ./server/Cargo.toml:/app/Cargo.toml
+      - ./server/Cargo.lock:/app/Cargo.lock
     depends_on:
       postgres:
         condition: service_healthy
@@ -110,21 +112,6 @@ services:
         condition: service_healthy
     networks:
       - rt-messenger
-
-  # ── Flutter Client (dev server) ────────────────────────────
-  # flutter:
-  #   image: ghcr.io/cirruslabs/flutter:3.47.0
-  #   working_dir: /app
-  #   command: flutter run --debug --machine --device-id=flutter-web --web-port=3000
-  #   ports:
-  #     - "${FLUTTER_DEBUG_PORT:-9100}:3000"
-  #   volumes:
-  #     - ./client:/app
-  #     - flutter_pub_cache:/root/.pub-cache
-  #   depends_on:
-  #     - server
-  #   networks:
-  #     - rt-messenger
 
 volumes:
   postgres_dev_data:
