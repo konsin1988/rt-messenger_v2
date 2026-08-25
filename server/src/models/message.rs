@@ -17,4 +17,4 @@ pub struct CreateMessage {
     pub content: String,
 }
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize };

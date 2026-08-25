@@ -18,4 +18,4 @@ pub struct CreateUser {
     pub password_hash: String,
 }
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize};
